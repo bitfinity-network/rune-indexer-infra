@@ -1,0 +1,62 @@
+#!/bin/bash
+set -euo pipefail
+
+# Update and install dependencies
+apt-get update
+apt-get install -y pkg-config libssl-dev build-essential snapd curl
+
+# Install Bitcoin Core
+snap install bitcoin-core
+
+# Install ord
+curl --proto '=https' --tlsv1.2 -fsLS https://ordinals.com/install.sh | bash -s -- --to /usr/local/bin
+
+echo "Setting up directories"
+# Create Bitcoin Core systemd service
+cat <<EOT >/etc/systemd/system/bitcoind.service
+[Unit]
+Description=Bitcoin Core Daemon
+After=network.target
+
+[Service]
+ExecStart=/snap/bin/bitcoin-core.daemon -conf="/opt/indexer/bitcoin.conf"
+User=indexer
+Type=simple
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
+EOT
+
+echo "Creating ord configuration file"
+
+# Create ord systemd service
+cat <<EOT >/etc/systemd/system/ord.service
+[Unit]
+Description=Ord Indexer
+After=network.target bitcoind.service
+
+[Service]
+ExecStart=/usr/local/bin/ord --config /opt/indexer/ord.yaml server
+User=indexer
+Restart=always
+
+[Install]
+WantedBy=multi-user.target
+EOT
+
+# Reload systemd, enable and start services
+systemctl daemon-reload
+systemctl enable bitcoind.service
+systemctl start bitcoind.service
+systemctl enable ord.service
+systemctl start ord.service
+
+Wait for Bitcoin Core to start and sync
+while ! sudo -u bitcoin bitcoin-core.cli -conf=/opt/indexer/bitcoin.conf getblockchaininfo; do
+    echo "Waiting for Bitcoin Core to start…"
+    sleep 10
+done
+
+echo "Startup script completed successfully"
