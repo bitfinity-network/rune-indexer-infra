@@ -11,7 +11,24 @@ snap install bitcoin-core
 # Install ord
 curl --proto '=https' --tlsv1.2 -fsLS https://ordinals.com/install.sh | bash -s -- --to /usr/local/bin
 
-echo "Setting up directories"
+# Create directory
+mkdir -p /opt/indexer
+
+# Create directory and set permissions
+mkdir -p /opt/indexer
+chmod -R 777 /opt/indexer
+
+# Create Bitcoin configuration directory
+mkdir -p /root/snap/bitcoin-core/common/.bitcoin
+
+# Configure Bitcoin daemon
+cat <<EOT >/root/snap/bitcoin-core/common/.bitcoin/bitcoin.conf
+rpcuser=${bitcoin_rpc_user}
+rpcpassword=${bitcoin_rpc_password}
+chain=${network}
+txindex=1
+EOT
+
 # Create Bitcoin Core systemd service
 cat <<EOT >/etc/systemd/system/bitcoind.service
 [Unit]
@@ -19,8 +36,7 @@ Description=Bitcoin Core Daemon
 After=network.target
 
 [Service]
-ExecStart=/snap/bin/bitcoin-core.daemon -conf="/opt/indexer/bitcoin.conf"
-User=indexer
+ExecStart=/snap/bin/bitcoin-core.daemon
 Type=simple
 Restart=on-failure
 RestartSec=5
@@ -29,7 +45,17 @@ RestartSec=5
 WantedBy=multi-user.target
 EOT
 
-echo "Creating ord configuration file"
+# Create ord configuration file
+cat <<EOT >/opt/indexer/ord.yaml
+bitcoin_rpc_username: ${bitcoin_rpc_user}
+bitcoin_rpc_password: ${bitcoin_rpc_password}
+chain: ${network}
+index_runes: true
+first_inscription_height: ${index_start_height}
+EOT
+
+# Set permissions
+chmod 666 /opt/indexer/ord.yaml
 
 # Create ord systemd service
 cat <<EOT >/etc/systemd/system/ord.service
@@ -39,7 +65,6 @@ After=network.target bitcoind.service
 
 [Service]
 ExecStart=/usr/local/bin/ord --config /opt/indexer/ord.yaml server
-User=indexer
 Restart=always
 
 [Install]
@@ -48,15 +73,7 @@ EOT
 
 # Reload systemd, enable and start services
 systemctl daemon-reload
-systemctl enable bitcoind.service
-systemctl start bitcoind.service
-systemctl enable ord.service
-systemctl start ord.service
-
-Wait for Bitcoin Core to start and sync
-while ! sudo -u bitcoin bitcoin-core.cli -conf=/opt/indexer/bitcoin.conf getblockchaininfo; do
-    echo "Waiting for Bitcoin Core to start…"
-    sleep 10
-done
+systemctl enable bitcoind.service ord.service
+systemctl start bitcoind.service ord.service
 
 echo "Startup script completed successfully"
